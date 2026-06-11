@@ -6,13 +6,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import request from '../utils/request.js'
+import { currentTheme, getChartTheme } from '../utils/theme.js'
 
 const el = ref(null)
 const loading = ref(true)
 let chart = null
+let cachedStoreNames = null
+let cachedMatrix = null
 
 // 价格区间定义
 const priceRanges = [
@@ -74,6 +77,8 @@ const fetchData = async () => {
 
     const storeNames = [...topStores]
     if (hasOther) storeNames.push('其他')
+    cachedStoreNames = storeNames
+    cachedMatrix = matrix
     renderChart(storeNames, matrix)
   } catch (e) { console.error(e) }
   finally { loading.value = false }
@@ -81,29 +86,24 @@ const fetchData = async () => {
 
 const renderChart = (storeNames, matrix) => {
   if (!chart) return
-
+  const t = getChartTheme()
   const xLabels = priceRanges.map(r => r.label)
+
   const series = storeNames.map((name, i) => {
     const c = stackColors[i % stackColors.length]
     return {
-      name,
-      type: 'bar',
-      stack: 'total',
-      barWidth: '50%',
+      name, type: 'bar', stack: 'total', barWidth: '50%',
       data: matrix[name],
       itemStyle: {
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: c.to },
-          { offset: 1, color: c.from }
+          { offset: 0, color: c.to }, { offset: 1, color: c.from }
         ]),
         borderRadius: i === storeNames.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]
       },
       emphasis: {
         itemStyle: {
-          shadowBlur: 16,
-          shadowColor: 'rgba(0,216,255,0.4)',
-          borderColor: '#00d8ff',
-          borderWidth: 1
+          shadowBlur: 16, shadowColor: 'rgba(0,216,255,0.4)',
+          borderColor: t['--accent-secondary'], borderWidth: 1
         }
       }
     }
@@ -111,15 +111,12 @@ const renderChart = (storeNames, matrix) => {
 
   chart.setOption({
     tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(10,22,40,0.95)',
-      borderColor: 'rgba(0,216,255,0.3)',
-      borderWidth: 1,
-      textStyle: { color: '#e2e8f0', fontSize: 15 },
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: t.chartTooltipBg, borderColor: t.chartTooltipBorder,
+      borderWidth: 1, textStyle: { color: t.chartTooltipText, fontSize: 15 },
       formatter: params => {
         const total = params.reduce((s, p) => s + p.value, 0)
-        let html = `<b style="color:#00d8ff">¥${params[0].axisValue}</b> (共 ${total} 本)<br/>`
+        let html = `<b style="color:${t['--accent-secondary']}">¥${params[0].axisValue}</b> (共 ${total} 本)<br/>`
         params.filter(p => p.value > 0).forEach(p => {
           const pct = ((p.value / total) * 100).toFixed(1)
           html += `${p.marker} ${p.seriesName}: <b>${p.value}</b> 本 (${pct}%)<br/>`
@@ -128,34 +125,31 @@ const renderChart = (storeNames, matrix) => {
       }
     },
     legend: {
-      data: storeNames,
-      top: 4,
-      itemGap: 14,
-      itemWidth: 10,
-      itemHeight: 10,
-      textStyle: { fontSize: 13, color: 'rgba(203,213,225,0.65)' }
+      data: storeNames, top: 4, itemGap: 14, itemWidth: 10, itemHeight: 10,
+      textStyle: { fontSize: 13, color: t.chartText }
     },
     grid: { left: 12, right: 16, top: 40, bottom: 10, containLabel: true },
     xAxis: {
-      type: 'category',
-      data: xLabels,
-      axisLabel: { fontSize: 14, color: 'rgba(203,213,225,0.6)', formatter: v => '¥' + v },
-      axisLine: { lineStyle: { color: 'rgba(76,155,253,0.12)' } },
+      type: 'category', data: xLabels,
+      axisLabel: { fontSize: 14, color: t.chartText, formatter: v => '¥' + v },
+      axisLine: { lineStyle: { color: t.chartAxis } },
       axisTick: { show: false }
     },
     yAxis: {
-      type: 'value',
-      name: '图书数量',
-      nameTextStyle: { color: 'rgba(148,163,184,0.5)', fontSize: 13 },
-      axisLabel: { fontSize: 13, color: 'rgba(203,213,225,0.4)' },
+      type: 'value', name: '图书数量',
+      nameTextStyle: { color: t.chartText, fontSize: 13 },
+      axisLabel: { fontSize: 13, color: t.chartText },
       axisLine: { show: false },
-      splitLine: { lineStyle: { color: 'rgba(76,155,253,0.06)' } }
+      splitLine: { lineStyle: { color: t.chartSplit } }
     },
     series,
     animationDuration: 1000,
     animationEasing: 'cubicOut'
   })
 }
+
+watch(currentTheme, () => { if (cachedStoreNames) renderChart(cachedStoreNames, cachedMatrix) })
+defineExpose({ refresh: fetchData })
 
 const onResize = () => chart?.resize()
 onMounted(() => { chart = echarts.init(el.value); fetchData(); window.addEventListener('resize', onResize) })
@@ -166,6 +160,6 @@ onUnmounted(() => { window.removeEventListener('resize', onResize); chart?.dispo
 .chart-wrap{position:relative;width:100%;flex:1;min-height:240px}
 .chart{width:100%;height:100%}
 .loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2}
-.spin{width:24px;height:24px;border:2px solid rgba(76,155,253,0.15);border-top-color:#00d8ff;border-radius:50%;animation:sp .7s linear infinite}
+.spin{width:24px;height:24px;border:2px solid rgba(76,155,253,0.15);border-top-color:var(--accent-secondary,#00d8ff);border-radius:50%;animation:sp .7s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 </style>
